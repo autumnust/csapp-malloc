@@ -1,5 +1,7 @@
 /*
  * mm.c
+ * Andrew ID: lsun1
+ * Name: SUN Lei
  *
  * NOTE TO STUDENTS: Replace this header comment with your own header
  * comment that gives a high level description of your solution.
@@ -44,10 +46,9 @@
 
 #define WSIZE       4        /* Word and header/footer size (bytes) */ 
 #define DSIZE       8       /* Double word size (bytes) */
-#define CHUNKSIZE  (1<<12)   /* Extend heap by this amount (bytes) */  
+#define CHUNKSIZE  (1<<9)   /* Extend heap by this amount (bytes) */  
 #define NUM_OF_LIST 14    
                         /*The size of free list from 2^4 to 2^17*/
-#define WNULL 0U
 
 #define MAX(x, y) ((x) > (y)? (x) : (y))  
 
@@ -65,7 +66,6 @@
 /* Read the size and allocated fields from address p */
 #define GET_SIZE(p)         (GET(p) & ~0x7)                   
 #define GET_ALLOC(p)        (GET(p) & 0x1)       
-#define GET_PREV_ALLOC(p)   (GET(p) & 0x2)
 
 /* Given block ptr bp, compute address of its header and footer */
 #define HDRP(bp)       ((char *)(bp) - WSIZE)                      
@@ -75,10 +75,10 @@
 #define NEXT_BLKP(bp)  ((char *)(bp) + GET_SIZE(((char *)(bp) - WSIZE))) 
 #define PREV_BLKP(bp)  ((char *)(bp) - GET_SIZE(((char *)(bp) - DSIZE))) 
 
-#define GET_PREV(bp)    (GET_PTR(bp)) 
-#define GET_NEXT(bp)    (GET_PTR((void *)bp + DSIZE)) 
-#define SET_NEXT(bp, ptr)       (PUT_PTR((void*)bp + DSIZE, ptr)) 
-#define SET_PREV(bp, ptr)       (PUT_PTR((void*)bp , ptr)) 
+#define GET_PREV(bp)    (GET(bp)) 
+#define GET_NEXT(bp)    (GET((void *)bp + WSIZE)) 
+#define SET_NEXT(bp, w_ptr)       (PUT((void*)bp + WSIZE, w_ptr)) 
+#define SET_PREV(bp, w_ptr)       (PUT((void*)bp , w_ptr)) 
 
 /*Global variables*/ 
 static char *heap_listp = 0 ;  /* Pointer to first block */  
@@ -92,21 +92,15 @@ static void *coalesce(void *bp);
 static void checkheap(int verbose);
 static void *add_to_list(void *bp, size_t size) ; 
 static void *delete_block_from_list(void *bp, size_t size) ; 
+static void *fill_in_offset(unsigned int num);
+static unsigned int fetch_out_offset(void* ptr);
+
 static int in_heap(const void *p); 
 static int aligned(const void *p); 
 static void printblock(void *bp) ;
 static void checkblock(void *bp) ; 
 
-
-static void* word_to_ptr(unsigned int w)  
-{  
-    return ((w) == WNULL ? NULL : (void*)((unsigned int)(w) + 0x800000000UL));  
-}  
-
-static unsigned int ptr_to_word(void* p)  
-{  
-    return ((p) == NULL ? WNULL : (unsigned int)((unsigned long)(p) - 0x800000000UL));  
-}  
+// static void check_free_list(size_t size);
 
 
 /*
@@ -161,7 +155,7 @@ void *malloc (size_t size) {
 
     /* Adjust block size to include overhead and alignment reqs. */
     if (size <= DSIZE)
-        asize = 3*DSIZE;   // Header + footer (DSIZE) + Data & Alignment(DSIZE) + PREV & SUCC (DSIZE)
+        asize = 2*DSIZE;   // Header + footer (DSIZE) + Data & Alignment(DSIZE) + PREV & SUCC (DSIZE)
     else
         asize = ALIGN(DSIZE + size) ;  // Properly use the function that is given by the example.
 
@@ -246,10 +240,8 @@ void *calloc (size_t nmemb, size_t size) {
     // Remain the same with the implementation in mm-naive.c 
     size_t bytes = nmemb * size;
     void *newptr;
-
     newptr = malloc(bytes);
     memset(newptr, 0, bytes);
-
     return newptr;
 }
 
@@ -274,6 +266,7 @@ static int aligned(const void *p) {
  * mm_checkheap
  */
 void mm_checkheap(int lineno) {
+    lineno = lineno ; 
     checkheap(1);
 }
 
@@ -300,20 +293,15 @@ static void *coalesce(void *bp)
     }
 
     else if (!prev_alloc && next_alloc) {      /* Case 3 */
-        // size += GET_SIZE(HDRP(PREV_BLKP(bp)));
+        
+        size += GET_SIZE(HDRP(PREV_BLKP(bp)));
 
-        // delete_block_from_list(PREV_BLKP(bp), GET_SIZE(HDRP(PREV_BLKP(bp)))) ; 
+        delete_block_from_list(PREV_BLKP(bp), GET_SIZE(HDRP(PREV_BLKP(bp))));
 
-        // PUT(FTRP(bp), PACK(size, 0));
-        // PUT(HDRP(PREV_BLKP(bp)), PACK(size, 0));
-        // bp = PREV_BLKP(bp);
+        PUT(HDRP(PREV_BLKP(bp)), PACK(size,0));
+        PUT(FTRP(PREV_BLKP(bp)), PACK(size,0));
+
         bp = PREV_BLKP(bp);
-        size += GET_SIZE(HDRP(bp));
-
-        delete_block_from_list(bp, GET_SIZE(HDRP(bp)));
-
-        PUT(HDRP(bp), PACK(size,0));
-        PUT(FTRP(bp), PACK(size,0));
     }
 
     else {                                     /* Case 4 */
@@ -347,8 +335,8 @@ static void *extend_heap(size_t words)
     PUT(HDRP(bp), PACK(size, 0));         /* Free block header */   
     PUT(FTRP(bp), PACK(size, 0));         /* Free block footer */   
 
-    SET_NEXT(bp, NULL) ; 
-    SET_PREV(bp, NULL) ; 
+    SET_NEXT(bp, 0) ; 
+    SET_PREV(bp, 0) ; 
 
     PUT(HDRP(NEXT_BLKP(bp)), PACK(0, 1)); /* New epilogue header */ 
 
@@ -408,22 +396,20 @@ int size_map(size_t size)
 static void *add_to_list(void *bp, size_t size) 
 {   
     void *target_position = heap_ptr_head + size_map(size) * WSIZE  ; 
-    // void *original_head_bp = GET_PTR(target_position) ; 
-    void *original_head_bp = word_to_ptr(GET(target_position)) ; 
+    void *original_head_bp = fill_in_offset(GET(target_position)) ; 
 
     /*
     * Put the bp in the target position as the list head
     */
-    // PUT_PTR(target_position, bp) ;  
-    PUT(target_position, ptr_to_word(bp)) ; 
+    PUT(target_position, fetch_out_offset(bp)) ; 
 
-    SET_PREV(bp, NULL) ;            
+    SET_PREV(bp, 0) ;            
     if (original_head_bp != NULL) {        
-        SET_NEXT(bp, original_head_bp) ; 
-        SET_PREV(original_head_bp, bp) ;  
+        SET_NEXT(bp, fetch_out_offset(original_head_bp)); 
+        SET_PREV(original_head_bp, fetch_out_offset(bp) ) ;  
     } 
     else {
-        SET_NEXT(bp, NULL);
+        SET_NEXT(bp, 0);
     }
     return bp ; 
 }
@@ -432,27 +418,25 @@ static void *add_to_list(void *bp, size_t size)
 static void *delete_block_from_list(void *bp, size_t size) 
 {
 
-    void* next_block = GET_NEXT(bp) ; 
-    void* prev_block = GET_PREV(bp) ;  
+    void* next_block = fill_in_offset(GET_NEXT(bp)); 
+    void* prev_block = fill_in_offset(GET_PREV(bp));  
 
     if (next_block == NULL  && prev_block == NULL){
         // This is the only block ptr in this list 
         void *target_position =  heap_ptr_head + size_map(size) * WSIZE ;  
-        // PUT_PTR(target_position, NULL) ; 
         PUT(target_position , 0 ) ; 
     }
     else if (next_block == NULL && prev_block != NULL){
-        SET_NEXT(prev_block, NULL) ; 
+        SET_NEXT(prev_block, 0) ; 
     }
     else if (next_block != NULL && prev_block == NULL){
         void *target_position =  heap_ptr_head + size_map(size) * WSIZE ;  
-        // PUT_PTR(target_position, next_block) ;  
-        PUT(target_position, ptr_to_word(next_block)) ; 
-        SET_PREV(next_block, NULL) ; 
+        PUT(target_position, fetch_out_offset(next_block)) ; 
+        SET_PREV(next_block, 0) ; 
     }
     else if (next_block != NULL && prev_block != NULL){
-        SET_NEXT(prev_block, next_block) ; 
-        SET_PREV(next_block, prev_block) ; 
+        SET_NEXT(prev_block, fetch_out_offset(next_block)); 
+        SET_PREV(next_block, fetch_out_offset(prev_block)); 
     }
     // checkheap(0) ; 
     return bp ; 
@@ -469,11 +453,10 @@ static void *find_fit(size_t asize)
 
     for (iter = size_map(asize) ; iter < NUM_OF_LIST ; iter ++ ){
         target_position = heap_ptr_head + iter * WSIZE ;
-        // header_block_ptr = GET_PTR(target_position) ; 
-        header_block_ptr = word_to_ptr(GET(target_position)) ; 
+        header_block_ptr = fill_in_offset(GET(target_position)) ; 
 
         if (header_block_ptr != NULL){
-            for (bp = header_block_ptr; GET_SIZE(HDRP(bp)) > 0, bp != NULL; bp = GET_NEXT(bp)) {
+            for (bp = header_block_ptr; bp != NULL; bp = fill_in_offset(GET_NEXT(bp))) {
                 if (!GET_ALLOC(HDRP(bp)) && (asize <= GET_SIZE(HDRP(bp)))) {      
                     // checkheap(0) ; 
                     return bp;
@@ -493,12 +476,11 @@ static void place(void *bp, size_t asize)
 
     delete_block_from_list(bp, csize) ;  
 
-
-    if ((csize - asize) >= (3*DSIZE)) { 
+    if ((csize - asize) >= (2*DSIZE)) { 
         PUT(HDRP(bp), PACK(asize, 1));
         PUT(FTRP(bp), PACK(asize, 1));  
-        SET_NEXT(bp, NULL); 
-        SET_PREV(bp, NULL); 
+        SET_NEXT(bp, 0); 
+        SET_PREV(bp, 0); 
 
         bp = NEXT_BLKP(bp);   
         PUT(HDRP(bp), PACK(csize-asize, 0));        
@@ -512,6 +494,24 @@ static void place(void *bp, size_t asize)
     }
     // checkheap(0) ; 
 }
+
+static void* fill_in_offset(unsigned int num)  
+{  
+    if (num == 0 )
+        return NULL ; 
+    else {
+        return (void*)((unsigned int )num + 0x800000000);
+    }
+}  
+
+static unsigned int fetch_out_offset(void* ptr)  
+{  
+    if (ptr == NULL) 
+        return 0 ; 
+    else {
+        return ((unsigned int)(long)(ptr - 0x800000000)); 
+    }
+}  
 
 /* 
  * checkheap - Minimal check of the heap for consistency 
@@ -531,7 +531,7 @@ void checkheap(int lineno)
         if (lineno) 
             printblock(bp);
         checkblock(bp);
-    }
+    }    
 
     if (lineno)
         printblock(bp);
@@ -566,20 +566,22 @@ static void checkblock(void *bp)
         printf("Error: %p is not doubleword aligned\n", bp);
     if (GET(HDRP(bp)) != GET(FTRP(bp)))
         printf("Error: header does not match footer\n");
+    if (in_heap(bp)){} ; 
+    if (aligned(bp)){} ; 
 }
 
 
-static void check_free_list(size_t size)
-{
-    void *target_position = heap_ptr_head + size_map(size) * DSIZE  ; 
-    void *original_head_bp = GET_PTR(target_position) ; 
-    void *tmp = original_head_bp ;  
-    int length = 0 ; 
+// static void check_free_list(size_t size)
+// {
+//     void *target_position = heap_ptr_head + size_map(size) * DSIZE  ; 
+//     void *original_head_bp = GET_PTR(target_position) ; 
+//     void *tmp = original_head_bp ;  
+//     int length = 0 ; 
     
-    while(tmp != NULL){
-        checkblock(original_head_bp) ; 
-        tmp = GET_NEXT(tmp) ; 
-        length += 1 ; 
-    }
-}
+//     while(tmp != NULL){
+//         checkblock(original_head_bp) ; 
+//         tmp = GET_NEXT(tmp) ; 
+//         length += 1 ; 
+//     }
+// }
 
